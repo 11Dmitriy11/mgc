@@ -1,59 +1,22 @@
 args <- commandArgs(trailingOnly = TRUE)
+
+# Подключение библиотек
 library(dplyr)
-library(readxl)
 library(tidyr)
-library(mcmcRanking)
 library(igraph)
+library(mcmcRanking)
 library(BioNet)
-library(ROCR)
 library(xgboost)
 
-   
+# Функции
 min_max_standardize <- function(x) {
-  return ((x - min(x)) / (max(x) - min(x)))
-}  
-'%!in%' <- function(x,y)!('%in%'(x,y))
+  (x - min(x)) / (max(x) - min(x))
+}
 
 fisher_combine <- function(pvals) {
   X2 <- -2 * sum(log(pvals))
   df <- 2 * length(pvals)
-  combined_p <- 1 - pchisq(X2, df)
-  return(combined_p)
-}
-
-get_random_connected_subgraph <- function(graph, subgraph_size) {
-   V(graph)$likelihood <- 1
-    z <-
-      mcmc_sample(
-        graph = graph,
-        times = 1,
-        niter = 1e4,
-        subgraph_order =  subgraph_size
-      )
-    p <- get_frequency(z)
-    selected_vertices <- names(p[p>0])
-subgraph <- induced_subgraph(graph, selected_vertices)
-return(subgraph)
-}
-
-get_connected_subgraph <- function(graph, target_size) {
-  
-  if (vcount(graph) < target_size) {
-    stop("The graph does not have enough vertices.")
-  }
-  start_vertex <- sample(V(graph), 1)
-  
-  bfs_result <- igraph::bfs(graph, root = start_vertex, dist = TRUE)
-  
-  if (length(bfs_result$order) < target_size) {
-    stop("The graph is not large enough to contain a subgraph with the target size.")
-  }
-  
-  selected_vertices <- bfs_result$order[1:target_size]
-  
-  subgraph <- induced_subgraph(graph, selected_vertices)
-  
-  return(subgraph)
+  1 - pchisq(X2, df)
 }
 
 find_k_closest_gene_paths <- function(graph, gene_names, k) {
@@ -65,117 +28,92 @@ find_k_closest_gene_paths <- function(graph, gene_names, k) {
     
     for (gene in gene_names) {
       if (gene %in% V(graph)$name) {
-        path <- shortest_paths(graph, from = v, to = which(V(graph)$name == gene), output = "vpath")$vpath[[1]]
-        path_length <- length(path) - 1  
-        
+        path <- shortest_paths(graph, from = v, to = gene, output = "vpath")$vpath[[1]]
+        path_lengths[gene] <- length(path) - 1
         paths[[gene]] <- path
-        path_lengths[gene] <- path_length
       }
     }
     
-    sorted_genes <- names(sort(path_lengths, decreasing = FALSE))
-    k_shortest_paths <- lapply(sorted_genes[1:min(k, length(sorted_genes))], function(gene) paths[[gene]])
-    
+    sorted_genes <- names(sort(path_lengths))
+    k_shortest_paths <- lapply(sorted_genes[1:min(k, length(sorted_genes))], function(g) paths[[g]])
     k_closest_paths[[V(graph)$name[v]]] <- k_shortest_paths
   }
   
-  return(k_closest_paths)
+  k_closest_paths
 }
 
-extract_4_element <- function(sublist) {
-  return(sublist[4])
-}
-extract_5_element <- function(sublist) {
-  return(sublist[5])
-}
-extract_3_element <- function(sublist) {
-  return(sublist[3])
-}
-extract_2_element <- function(sublist) {
-  return(sublist[2])
-}
-extract_1_element <- function(sublist) {
-  return(sublist[1])
-}
-count_vertices <- function(sublist) {
-  return(length(sublist[[1]]))
-}
-
-edges <- read.table(args[1], sep='\t',header=F, col.names=c('u', 'v'))
+# Загрузка данных
+edges <- read.table(args[1], sep = '\t', header = FALSE, col.names = c('u', 'v'))
 g <- graph_from_edgelist(as.matrix(edges))
-g <- largestComp(g)
-g <- simplify(g)
+g <- igraph::simplify(g)
 
-true_genes <- read.table(args[2], sep='\t',header=F)
-true_genes <- true_genes$V1
-shortest_paths_to_genes <- find_k_closest_gene_paths(as.undirected(general_subgraph), true_genes, 3)
+true_genes <- read.table(args[2], sep = '\t', header = FALSE)$V1
 
-first_elements <- sapply(lapply(shortest_paths_to_genes, extract_1_element),count_vertices)
-second_elements <- sapply(lapply(shortest_paths_to_genes, extract_2_element),count_vertices)
-third_elements <- sapply(lapply(shortest_paths_to_genes, extract_3_element),count_vertices)
+# Проверка компоненты связности
+components <- components(g)
+largest_comp_id <- which.max(components$csize)
+general_subgraph <- induced_subgraph(g, which(components$membership == largest_comp_id))
 
+# Параметры
+l <- 3  # задаем количество раундов, можно вынести как аргумент
+set.seed(123)
+
+# Случайные p-value для демонстрации
+random <- runif(vcount(general_subgraph))
+names(random) <- V(general_subgraph)$name
+
+# Обработка
+shortest_paths_to_genes <- find_k_closest_gene_paths(general_subgraph, true_genes, 3)
+
+# Сбор путей (по количеству вершин)
+get_length <- function(path) length(path)
+first_elements <- sapply(shortest_paths_to_genes, function(x) if (length(x) >= 1) get_length(x[[1]]) else NA)
+second_elements <- sapply(shortest_paths_to_genes, function(x) if (length(x) >= 2) get_length(x[[2]]) else NA)
+third_elements <- sapply(shortest_paths_to_genes, function(x) if (length(x) >= 3) get_length(x[[3]]) else NA)
+
+# p-value и объединение
+d <- data.frame(name = V(general_subgraph)$name)
 for (i in 1:l) {
-  V(general_subgraph)$likelihood <- V(general_subgraph)$pval
-if (i == 1) {
   V(general_subgraph)$pval <- random[V(general_subgraph)$name]
-  d <-  data.frame(name = V(general_subgraph)$name, likelihood = V(general_subgraph)$likelihood)
-}
-else { 
-  d[,paste("likelihood",i,sep="")] <- V(general_subgraph)$likelihood
-}
+  d[, paste0("likelihood", i)] <- V(general_subgraph)$pval
 }
 
 if (l == 1) {
-  d$Product <- d$likelihood
-  V(general_subgraph)$pval <- d$Product
-  fdr <- quantile(V(general_subgraph)$pval,0.05)
-  general_subgraph <- set_likelihood(graph = general_subgraph, fdr = as.numeric(fdr))
+  d$Product <- d$likelihood1
 } else {
-  d$Product <- apply(d[, 2:(l+1)], 1, fisher_combine)
-  V(general_subgraph)$pval <- d$Product
-  fdr <- quantile(V(general_subgraph)$pval,0.05)
-  general_subgraph <- set_likelihood(graph = general_subgraph, fdr = as.numeric(fdr))
+  d$Product <- apply(d[, paste0("likelihood", 1:l)], 1, fisher_combine)
 }
 
 V(general_subgraph)$pval <- d$Product
-fdr <- quantile(V(general_subgraph)$pval,0.05)
+fdr <- quantile(V(general_subgraph)$pval, 0.05)
 general_subgraph <- set_likelihood(graph = general_subgraph, fdr = as.numeric(fdr))
 
-
-z <-
-  mcmc_sample(
-    graph = general_subgraph,
-    times = 1e2,
-    niter = 1e4,
-    exp_lh = 1 / 2 ^ (depth:0)
-  )
+# MCMC выбор
+z <- mcmc_sample(
+  graph = general_subgraph,
+  times = 100,
+  niter = 10000,
+  exp_lh = 1 / 2 ^ (l:0)
+)
 
 p <- get_frequency(z, prob = TRUE)
 d_f <- data.frame(prob = p, names = names(p))
+d_f$y <- ifelse(d_f$names %in% true_genes, 1, 0)
+d_f$pval <- V(general_subgraph)$pval[match(d_f$names, V(general_subgraph)$name)]
+d_f$first <- first_elements[match(d_f$names, names(first_elements))]
+d_f$second <- second_elements[match(d_f$names, names(second_elements))]
+d_f$third <- third_elements[match(d_f$names, names(third_elements))]
 
-d_f <- d_f %>% mutate(y = case_when(names %in% names(subgraph_vertices) ~ 1,
-                                    TRUE ~ 0))
+# Подготовка данных для XGBoost
+features <- d_f %>% select(prob, pval, first, second, third) 
+label <- d_f$y
+dtrain <- xgb.DMatrix(data = as.matrix(features), label = label)
 
-named_vector <- setNames(V(general_subgraph)$pval, V(general_subgraph)$name)
-d_f$pval <-  named_vector[row.names(d_f)]
+# Обучение XGBoost
+model_xgb <- xgboost(data = dtrain, max_depth = 3, eta = 0.1, nrounds = 100, objective = "binary:logistic", verbose = 0)
+d_f$pred <- predict(model_xgb, as.matrix(features))
 
-d_f$first <- first_elements[row.names(d_f)]
-d_f$second <- second_elements[row.names(d_f)]
-d_f$third <- third_elements[row.names(d_f)]
-
-d_f$y <- ifelse(row.names(d_f) %in% true_genes == 1, 0)
-row.names(RES) <- 1:nrow(RES)
-
-label <- RES$y
-
-tr <- xgb.DMatrix(data = as.matrix(RES[,-c(2,3,4,ncol(RES))]), label = as.numeric(RES$y))
-model_xgb <- xgboost(data = tr, label = label,max_depth = 3, eta = 0.1, nrounds = 100, objective = "binary:logistic")
-res <- predict(model_xgb, as.matrix(RES[,-c(2,3,4,ncol(RES))]),  type = "prob")
-RES$pred <- res
-
-
-
-
-
+# Запись результатов
+write.table(d_f, file = 'test.txt', sep = '\t', quote = FALSE, row.names = FALSE, col.names = TRUE)
 
 
