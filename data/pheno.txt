@@ -1,0 +1,7 @@
+chol
+Tg
+ldlp
+hdlp
+gluc
+crea
+GFR
