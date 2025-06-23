@@ -1,0 +1,21 @@
+Package: mgc
+Type: Package
+Title: Probabilistic Clustering of Matrix and Graph Data
+Version: 0.1.0
+Authors@R: c(
+    person("Dmitriy", "Usoltsev", role = c("aut", "cre"),
+           email = "usoltsev@example.com")
+)
+Description: Implements probabilistic matrix and graph clustering
+    algorithms as described in the dissertation 'Methods of Probabilistic
+    Clustering for Interpreting Matrix and Graph Information from
+    Heterogeneous Databases'.  Includes Mahalanobis-based control
+    cohort selection and an MCMC search for active network modules.
+License: MIT + file LICENSE
+Encoding: UTF-8
+LazyData: true
+Imports:
+    MASS,
+    Matrix,
+    igraph
+RoxygenNote: 7.3.1

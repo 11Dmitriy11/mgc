@@ -1,6 +1,28 @@
-pmc.R selects a subset from a control matrix that closely matches the test matrix across multiple features in pheno.txt file.  
+# mgc <img src="https://img.shields.io/badge/R-%3E=4.2-blue" align="right">
 
-## Usage
+**Probabilistic clustering of matrix and graph data**  
+Реализация алгоритмов, разработанных в диссертационной работе  
+_Усольцева Д. А. «Методы вероятностной кластеризации для интерпретации матричной и графовой информации из разнородных баз данных»_.
 
-```bash
-Rscript script.R test_matrix.tsv control_matrix.tsv pheno.txt
+---
+
+## Назначение пакета
+
+Пакет **mgc** предоставляет:
+
+| Модуль | Назначение | Ключевые шаги |
+|--------|-----------|---------------|
+| `prob_matrix_clustering()` | Формирование статистически сопоставимой контрольной выборки | IRNT → SVD → расстояние Махаланобиса вероятностный отбор |
+| `prob_graph_clustering()` | Поиск активного активного модуля | Metropolis–Hastings MCMC с сохранением связности |
+| `export_mgc_module()` | Экспорт найденного подграфа для функциональной аннотации | CSV или GMT-формат |
+
+Методы оптимизированы для гетерогенных -omics-данных, но остаются универсальными для любых матриц признаков и взвешенных графов.
+
+---
+
+## Установка
+
+```r
+# установка из GitHub
+if (!require("remotes")) install.packages("remotes")
+remotes::install_github("11Dmitriy11/mgc")
